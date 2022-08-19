@@ -11,11 +11,9 @@ pipeline {
     stages{
         stage('hello-world'){
             steps{
-                echo "Hello World!"
-                //script {
-		        //    echo "Hello World!!"
-                //    echo "${ENV_HELLO}"
-                //}
+                script {
+		            echo "${ENV_HELLO}"
+                }
             }
         }
     }
