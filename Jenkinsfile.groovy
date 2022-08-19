@@ -1,5 +1,9 @@
 pipeline {    
-    agent { label 'BuildServer' };
+    agent { label 'linux' };
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '5', dayToKeepStr '', numToKeepStr: '5')
+        disableConcurrentBuilds()
+    }
     environment{
         ENV_HELLO="Hello World!" 
     }
