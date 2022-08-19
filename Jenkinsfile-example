@@ -1,0 +1,461 @@
+@Library('bpd-pipeline-library')_
+import org.bpd.AndroidHelper
+def androidUtils = new AndroidHelper(this)
+//def ARTIFACTS_BUILD = " assembleDev"
+ARTIFACT_URL_LISTS  = []
+ARTIFACT_TO_APPCENTER_LIST  = []
+
+pipeline {
+    
+    agent { label 'BuildServer' };
+    
+    parameters {
+		booleanParam(name: 'IS_AUTOMATIC_BUILD', defaultValue: true, description: 'Indica si el build es generado de manera manual o automatico')
+        
+        booleanParam(name: 'DEV_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de Desarrollo')
+        booleanParam(name: 'DUMMY_DEV_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de Desarrollo apuntando a los servicios Dummy')
+        booleanParam(name: 'PROXY_DEV_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de Desarrollo apuntando al Proxy')
+        booleanParam(name: 'QA_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de QA apuntando a los servicios internos del Banco')
+        booleanParam(name: 'DUMMY_QA_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de QA apuntando a los servicios Dummy')
+        booleanParam(name: 'PROXY_QA_BUILD_ENABLED', defaultValue: false, description: 'Crear apk de QA apuntando al Proxy')
+        booleanParam(name: 'SIDDATECH_PROXY_DUMMY_BUILD_ENABLED', defaultValue: false, description: 'Crear apk apuntando al Proxy de Siddatech')
+        booleanParam(name: 'RELEASE_BUILD_ENABLED', defaultValue: false, description: 'Crear apk apuntando a Producción')
+
+        //Enable DexGuard
+        booleanParam(name: 'DEV_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de Desarrollo')
+        booleanParam(name: 'DUMMY_DEV_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de Desarrollo apuntando a dummy services')
+        booleanParam(name: 'PROXY_DEV_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de Desarrollo apuntando al proxy')
+        booleanParam(name: 'QA_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de QA')
+        booleanParam(name: 'DUMMY_QA_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de QA apuntando a dummy services')
+        booleanParam(name: 'PROXY_QA_DEXGUARD_ENABLED', defaultValue: false, description: 'Hablitar Dexguard para la Apk de QA apuntando a dummy services')
+    }
+    environment{
+        DEV_DEXGUARD_ENABLED = false
+        DUMMY_DEV_DEXGUARD_ENABLED = false
+        PROXY_DEV_DEXGUARD_ENABLED = false
+        QA_DEXGUARD_ENABLED = false
+        DUMMY_QA_DEXGUARD_ENABLED = false
+        PROXY_QA_DEXGUARD_ENABLED = false
+        KATALON_PATH = "C:\\DevOpsApps\\Katalon_Studio_Engine_Windows_64-7.2.1\\katalonc.exe"
+        KATALON_API_KEY="\"9e76aef0-7b6c-4a1a-b064-85c9d20135bf\""
+        KATALON_REPORT_FOLDER="Reports"
+        BRANCH_ENV = BRANCH_NAME.replace('/','-')
+        VERSION = getVersion()
+        ARTIFACTS_TO_UPLOAD=""
+        ARTIFACT_FOLDER=BRANCH_NAME.replace('/','-')
+        ARTIFACT_NAME = "${ARTIFACT_FOLDER}-core-library-android"
+        NEXUS_HOST = "http://10.96.46.115:8081/repository"
+      	SONAR_URL = "http://10.15.20.14/"
+        SONAR_PROJECT = "core-library-android"
+        OS="android"
+        APP_NAME = "core-library"
+        KEYSTORE_NAME = "core-library-android"
+        APP_DIR = "CoreLibrary"
+        GRADLE_WRAPPER = "http\\://10.96.46.115\\:8081/repository/zip-repo/gradle/gradle-7.0.2-all.zip"
+		JAVA_HOME = "${tool 'java-11-openjdk.x86_64'}"
+        DUMMY_APK_URL="${NEXUS_HOST}/${APP_NAME}/${OS}/${ARTIFACT_FOLDER}/${ARTIFACT_NAME}-dummy/${VERSION}/${ARTIFACT_NAME}-dummy-${VERSION}.apk"
+        
+    }
+
+    stages{
+        stage('Prepare'){
+            steps{
+              script {
+
+                  ARTIFACTS_TO_UPLOAD = getArtifactsToUpload()
+                  echo "${ARTIFACTS_TO_UPLOAD}"
+                  //getArtifactsToUpload()
+                    
+                  //setTestMode()
+			      setParamsVariables()
+
+
+                  // Enable nexus repos in build.gradle
+                  androidUtils.replaceTextInFile( textToReplace: "useNexusRepo = false", newText: "useNexusRepo = true", targetFile: "build.gradle")
+                  androidUtils.replaceTextInFile( textToReplace: "useNexusRepo = false", newText: "useNexusRepo = true", targetFile: "settings.gradle")
+                  // Enable Sonar Plugin repos in build.gradle
+                  androidUtils.replaceTextInFile( textToReplace: "cicdEnabled = false", newText: "cicdEnabled = true", targetFile: "build.gradle")   
+				  // Set Nexus as Active Gradle Wrapper Download Path
+                  // Set Nexus as Active Gradle Wrapper Download Path
+                  androidUtils.replaceTextInFile( textToReplace: "#distributionUrl=http", newText: "distributionUrl=http", targetFile: "gradle/wrapper/gradle-wrapper.properties") 
+                  // Disable external gradle wrapper download path
+                  androidUtils.replaceTextInFile( textToReplace: "distributionUrl=https", newText: "#distributionUrl=https", targetFile: "gradle/wrapper/gradle-wrapper.properties")  
+
+              }
+			
+            }
+        }
+        stage('Build'){
+          environment {
+            gradleArgs = "${ARTIFACTS_BUILD} --parallel -x lintVitalRelease"
+          }
+            steps{
+              script {
+                sh "chmod +x ./gradlew"
+                sh "./gradlew clean  ${env.gradleArgs}"
+                //androidUtils.build(JDKversion: "11+28", gradleArgs: "${ARTIFACTS_BUILD} --parallel -x lintVitalRelease  " )
+                //androidUtils.signAPK(apksToSign: "**/**/*.apk",keyAlias: "", keyStoreId : "" )
+                step([$class: 'SignApksBuilder', apksToSign:  "**/**/*.apk", archiveSignedApks: false, skipZipalign: true, keyAlias: "${KEYSTORE_NAME}", keyStoreId: "${KEYSTORE_NAME}"])
+                //step([$class: 'SignApksBuilder', apksToSign:  "**/**/*.apk", archiveSignedApks: false, skipZipalign: true, keyAlias: 'bpd-app-ampresarial', keyStoreId: 'debug.keystore'])               
+              }                
+            }
+        }
+        // stage('Run Sonar'){
+        //   environment {
+        //     PATH = "${tool 'java-11-openjdk.x86_64'}/bin:${env.PATH}"
+        //     SONAR_LOGIN_TOKEN = credentials('SONAR_LOGIN_TOKEN')
+        //   }
+        //     steps{
+        //         script {
+        //           sh 'printenv'
+        //           sh 'java -version'
+        //           androidUtils.runSonarAnalysis(projectKey: "${SONAR_PROJECT}",  branchName: "${BRANCH_NAME}", waitForResult: false, instance: this)
+        //         }
+        //     }
+        // }
+		
+        stage('Package'){
+           when {
+                branch pattern: "${BRANCH_NAME}|(release[\\S]+)", comparator: "REGEXP"
+            }
+		    steps {
+		        echo "${VERSION}"
+		        echo "${ARTIFACTS_TO_UPLOAD}"
+
+		         nexusArtifactUploader(
+                        artifacts: ARTIFACTS_TO_UPLOAD , 
+                    credentialsId: 'nexus-credentials', 
+                    groupId: "android.${ARTIFACT_FOLDER}.${VERSION}", 
+                    nexusUrl: '10.96.46.115:8081', 
+                    nexusVersion: 'nexus3', 
+                    protocol: 'http', 
+                    repository: "${APP_NAME}", 
+                    version: "${VERSION}")
+                
+                //Delete intermediates folder
+                sh "rm -rf ./app/build/intermediates"
+                sh "rm -rf ./build/intermediates"
+		    }
+		}
+		// stage('Distribute'){
+		//     when {
+        //         branch pattern: "${BRANCH_NAME}|(release[\\S]+)", comparator: "REGEXP"
+        //     }
+        //     steps{
+        //         // script {
+				
+		// 		// 	def cause = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')
+					
+        //         //      androidUtils.appCenterDistribute(
+		// 		// 	 requestedBy: cause.userName,
+		// 		// 	 branchName: "${BRANCH_NAME}",
+		// 		// 	 buildNumber: "${BUILD_NUMBER}" ,
+		// 		// 	 appEnv: "Development",
+		// 		// 	 distributionGroup : "Testers",
+		// 		// 	 artifactPath: "app/build/outputs/apk/release/app-release.apk",
+		// 		// 	 appCenterApplication: "Banco-Popular-Dominicano-App-Testing/App-Empresarial-Android"
+		// 		// 	 )
+        //         //     echo "Distribute"
+        //         // }
+        //         script{
+        //             echo "${ARTIFACT_TO_APPCENTER_LIST}"
+        //           if (BRANCH_NAME.toUpperCase().contains('PR-')){
+        //           	echo "Pull requests doesnt need to be deployed to app center"
+        //           }else{
+        //           	  ARTIFACT_TO_APPCENTER_LIST.each { artifact ->
+        //                 // 0 -> App environment  1 -> Apk Path
+        //                 addArtifactToAppCenter(artifact[0],artifact[1])
+        //             	}
+        //           }
+                  
+        //         }
+                
+        //     }
+        // }
+    }
+    // post { 
+    //     success { 
+    //         sendSuccessEmailNotification()
+    //         echo "success"
+    //     }
+    //     unsuccessful{
+    //         sendFailedEmailNotification()
+    //         echo "unsuccessful"
+    //     }
+    // }
+    
+}
+
+// def setTestMode(){
+//     sh "sed -i 's/isTestMode = false/isTestMode = true/g' build.gradle"
+//     sh "sed -i 's/mappingFileUploadEnabled true/mappingFileUploadEnabled false/g' ${APP_DIR}/build.gradle"
+// }
+
+def getVersion(){
+    script{
+        def version = sh label: 'Get version from tag', returnStdout: true, script: 'git tag --contains'
+        if (version){
+            return version.trim()
+        }
+        return "${BUILD_NUMBER}"
+    }
+}
+
+// def getTestSuite(){
+//     script {
+       
+//         // if (env.BRANCH_NAME.toUpperCase().contains("BPD-RECLAMACIONES")){
+//         //     return "Test Suites/SmokeTesting_Reclaimaciones"
+//         // }else  if  (env.BRANCH_NAME.toUpperCase().contains("BPD-ONBOARDING")){
+//         //     return "Test Suites/SmokeTesting-OnBoarding"
+//         // }else{
+           
+//         // }
+//          return "Test Suites/SmokeTesting"
+//     }
+    
+// }
+
+def getArtifactsToUpload(){
+    script {
+        def artifact = []
+        ARTIFACTS_BUILD = ""
+
+        APK_DEV_PATH="CoreLibrary/build/outputs/apk/dev/CoreLibrary-dev.apk"
+        APK_DEV_DUMMY_PATH="app/build/outputs/apk/dummyDev/app-dev.apk"
+        APK_DEV_PROXY_PATH="app/build/outputs/apk/proxyDev/app-dev.apk"
+        APK_QA_PATH="CoreLibrary/build/outputs/apk/QA/CoreLibrary-QA.apk"
+        APK_QA_DUMMY_PATH="CoreLibrary/build/outputs/apk/QA/CoreLibrary-QA.apk"
+        APK_QA_PROXY_PATH="CoreLibrary/build/outputs/apk/QA/CoreLibrary-QA.apk"
+        APK_RELEASE_PATH="app/build/outputs/apk/release/app-release.apk"
+        APK_SIDDATECH_DUMMY_PATH="app/build/outputs/apk/siddatechProxyDummy/app-siddatechProxyDummy.apk"
+
+
+        if (!params.IS_AUTOMATIC_BUILD){
+            if (params.DEV_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleDev"
+                addArtifactUrlToList("${ARTIFACT_NAME}-dev", "Desarrollo")
+                artifact.add([artifactId: "${ARTIFACT_NAME}-dev", classifier: '', file: APK_DEV_PATH, type: 'apk'])
+                
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "Desarrollo",
+                    APK_DEV_PATH
+                ])
+            }
+            if (params.DUMMY_DEV_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleDummy"
+                addArtifactUrlToList("${ARTIFACT_NAME}-dummy-dev", "Desarrollo Dummy")
+                artifact.add([artifactId: "${ARTIFACT_NAME}-dummy-dev", classifier: '', file: APK_DEV_DUMMY_PATH , type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "Desarrollo Dummy",
+                    APK_DEV_DUMMY_PATH
+                ])
+            }
+            if (params.PROXY_DEV_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleDev"
+                addArtifactUrlToList("${ARTIFACT_NAME}-dev-proxy", "Desarrollo Proxy")
+                artifact.add([artifactId: "${ARTIFACT_NAME}-dev-proxy", classifier: '', file: APK_DEV_PROXY_PATH, type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "Desarrollo Proxy",
+                    APK_DEV_PROXY_PATH
+                ])
+            }
+            if (params.QA_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleQA"
+                addArtifactUrlToList("${ARTIFACT_NAME}-qa", , "QA")
+                artifact.add([artifactId: "${ARTIFACT_NAME}-qa", classifier: '', file: APK_QA_PATH, type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "QA",
+                    APK_QA_PATH
+                ])
+            }
+            if (params.DUMMY_QA_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleQA"
+                addArtifactUrlToList("${ARTIFACT_NAME}-qa-dummy", "QA Dummy")                
+                artifact.add([artifactId: "${ARTIFACT_NAME}-qa-dummy", classifier: '', file: APK_QA_DUMMY_PATH, type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "QA Dummy",
+                    APK_QA_DUMMY_PATH
+                ])
+            }
+            if (params.PROXY_QA_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleQA"
+                addArtifactUrlToList("${ARTIFACT_NAME}-qa-proxy", "QA Proxy")                
+                artifact.add([artifactId: "${ARTIFACT_NAME}-qa-proxy", classifier: '', file: APK_QA_PROXY_PATH, type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "QA Proxy",
+                    APK_QA_PROXY_PATH
+                ])                
+            }
+            if (params.RELEASE_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleRelease"
+                addArtifactUrlToList("${ARTIFACT_NAME}-production", "Production")     
+                artifact.add([artifactId: "${ARTIFACT_NAME}-production", classifier: '', file: APK_RELEASE_PATH, type: 'apk'])  
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "Production",
+                    APK_RELEASE_PATH
+                ]) 
+                
+            }
+            if (params.SIDDATECH_PROXY_DUMMY_BUILD_ENABLED){
+                ARTIFACTS_BUILD += " assembleDummy"
+                addArtifactUrlToList("${ARTIFACT_NAME}-sidatech-proxy-dummy", "Sidatech Proxy")                
+                artifact.add([artifactId: "${ARTIFACT_NAME}-sidatech-proxy-dummy", classifier: '', file: APK_SIDDATECH_DUMMY_PATH, type: 'apk'])
+                ARTIFACT_TO_APPCENTER_LIST.add([
+                    "Sidatech Proxy",
+                    APK_SIDDATECH_DUMMY_PATH
+                ]) 
+            }
+        }else if (BRANCH_NAME.toUpperCase().contains('RELEASE/')){
+            //ARTIFACTS_BUILD = "assembleQA assembleProxyQA assembleRelease  "
+            ARTIFACTS_BUILD = " assembleQA assembleRelease  "
+            
+            addArtifactUrlToList("${ARTIFACT_NAME}-qa", "QA")
+            //addArtifactUrlToList("${ARTIFACT_NAME}-qa-proxy", "QA Proxy")
+            addArtifactUrlToList("${ARTIFACT_NAME}-production", "Production")    
+            
+            artifact.add([artifactId: "${ARTIFACT_NAME}-qa", classifier: '', file: APK_QA_PATH , type: 'apk'])
+            //artifact.add([artifactId: "${ARTIFACT_NAME}-qa-proxy", classifier: '', file: APK_QA_PROXY_PATH , type: 'apk'])  
+            artifact.add([artifactId: "${ARTIFACT_NAME}-production", classifier: '', file: APK_RELEASE_PATH , type: 'apk'])  
+
+            ARTIFACT_TO_APPCENTER_LIST.add([
+                "QA",
+                APK_QA_PATH
+            ]) 
+            // ARTIFACT_TO_APPCENTER_LIST.add([
+            //     "QA Proxy",
+            //     APK_QA_PROXY_PATH
+            // ]) 
+            ARTIFACT_TO_APPCENTER_LIST.add([
+                "Production",
+                APK_RELEASE_PATH
+            ]) 
+        }else{
+            //ARTIFACTS_BUILD = "assembleDev assembleProxyDev assembleProxyQA "
+            ARTIFACTS_BUILD = " assembleDev assembleQA "
+            
+            addArtifactUrlToList("${ARTIFACT_NAME}-dev", "Desarrollo")
+            //addArtifactUrlToList("${ARTIFACT_NAME}-dev-proxy", "Desarrollo Proxy")
+          	//addArtifactUrlToList("${ARTIFACT_NAME}-qa-proxy", "QA Proxy")
+          	addArtifactUrlToList("${ARTIFACT_NAME}-qa", "QA")
+            
+            artifact.add([artifactId: "${ARTIFACT_NAME}-dev", classifier: '', file: APK_DEV_PATH, type: 'apk'])
+            //artifact.add([artifactId: "${ARTIFACT_NAME}-dev-proxy", classifier: '', file: APK_DEV_PROXY_PATH , type: 'apk'])
+          	//artifact.add([artifactId: "${ARTIFACT_NAME}-qa-proxy", classifier: '', file: APK_QA_PROXY_PATH , type: 'apk'])  
+          	artifact.add([artifactId: "${ARTIFACT_NAME}-qa", classifier: '', file: APK_QA_PATH , type: 'apk'])  
+
+
+            ARTIFACT_TO_APPCENTER_LIST.add([
+                "QA",
+                APK_QA_PATH
+            ])
+            ARTIFACT_TO_APPCENTER_LIST.add([
+                "Desarrollo",
+                APK_DEV_PATH
+            ])
+
+            // ARTIFACT_TO_APPCENTER_LIST.add([
+            //     "Desarrollo Proxy",
+            //     APK_DEV_PROXY_PATH
+            // ])   
+          
+            // ARTIFACT_TO_APPCENTER_LIST.add([
+            //     "QA Proxy",
+            //     APK_QA_PROXY_PATH
+            // ])
+ 
+        }
+        return artifact
+    }
+
+}
+
+def changeDexGuard(dexguardFlagName, value){
+	sh "sed -i 's/${dexguardFlagName} = false/${dexguardFlagName} = ${value}/g' build.gradle"
+}
+
+def setParamsVariables(){
+	script{
+        if (!params.IS_AUTOMATIC_BUILD){
+            DEV_DEXGUARD_ENABLED = params.DEV_DEXGUARD_ENABLED
+            DUMMY_DEV_DEXGUARD_ENABLED = params.DUMMY_DEV_DEXGUARD_ENABLED
+            PROXY_DEV_DEXGUARD_ENABLED = params.PROXY_DEV_DEXGUARD_ENABLED
+            QA_DEXGUARD_ENABLED = params.QA_DEXGUARD_ENABLED
+            DUMMY_QA_DEXGUARD_ENABLED = params.DUMMY_QA_DEXGUARD_ENABLED
+            PROXY_QA_DEXGUARD_ENABLED = params.PROXY_QA_DEXGUARD_ENABLED
+        }else if (BRANCH_NAME.toUpperCase().contains('RELEASE/')){
+            DEV_DEXGUARD_ENABLED = true
+			DUMMY_DEV_DEXGUARD_ENABLED = true
+			PROXY_DEV_DEXGUARD_ENABLED = true
+			QA_DEXGUARD_ENABLED = true
+			DUMMY_QA_DEXGUARD_ENABLED = true
+			PROXY_QA_DEXGUARD_ENABLED = true
+        }else if (BRANCH_NAME.toUpperCase().contains('DEVELOPMENT')){
+		    DEV_DEXGUARD_ENABLED = false
+			DUMMY_DEV_DEXGUARD_ENABLED = false
+			PROXY_DEV_DEXGUARD_ENABLED = false
+			QA_DEXGUARD_ENABLED = false
+			DUMMY_QA_DEXGUARD_ENABLED = false
+			PROXY_QA_DEXGUARD_ENABLED = false
+		}else{
+		    DEV_DEXGUARD_ENABLED = false
+			DUMMY_DEV_DEXGUARD_ENABLED = false
+			PROXY_DEV_DEXGUARD_ENABLED = false
+			QA_DEXGUARD_ENABLED = false
+			DUMMY_QA_DEXGUARD_ENABLED = false
+			PROXY_QA_DEXGUARD_ENABLED = false
+		}
+	
+	}
+
+
+}
+
+// def addArtifactToAppCenter(appEnv, artifactPath){
+//     script {
+//         def cause = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')
+//         def distributionGroup=getAppCenterDistributionGroup()
+
+//         echo "userName: ${cause.userName}"
+//         sh """cat > releaseNote.txt << EOF
+
+// Branch: ${env.BRANCH_NAME} 
+
+// Jenkins Build Number: ${BUILD_NUMBER}
+
+// Ambiente: ${appEnv}
+
+// Solicitado por:  ${cause.userName}
+
+// Fecha de Ultimo Commit: 21/09/2021
+
+// EOF
+// """
+                    
+    
+//     sh """export https_proxy=http://10.48.17.17:85
+//     export http_proxy=http://10.48.17.17:85
+//     /usr/local/lib/node_modules/appcenter-cli/bin/appcenter.js  login --token 1bffffc95b32620f1d981f656a4a4aea0a19040d
+//     /usr/local/lib/node_modules/appcenter-cli/bin/appcenter.js distribute release -f ${artifactPath} -g '${distributionGroup}' --app Banco-Popular-Dominicano-App-Testing/core-library-Android -R releaseNote.txt
+//     """
+//     }
+
+// }
+
+def addArtifactUrlToList(artifact, button_name){
+    script{
+        def nexus_url = "http://10.96.46.115:8081/repository/core-library/android/${ARTIFACT_FOLDER}/${VERSION}/${artifact}/${VERSION}/${artifact}-${VERSION}.apk"
+        def html_button = """ <td align="center" style="padding:10px;Margin:0;"><a href="${nexus_url}" target="_blank" >APK ${button_name}</a></td>"""
+        ARTIFACT_URL_LISTS.add(html_button)
+    }
+}
+
+// def getAppCenterDistributionGroup(){
+//     if (BRANCH_NAME.toUpperCase().contains('DEVELOPMENT')){
+//         return "Integracion Desarrollo"
+//     }else if (BRANCH_NAME.toUpperCase().contains('RELEASE/')){
+//     	return "QA Release"
+//     }else{
+//         return "Demo Group"
+//     }
+// } 
