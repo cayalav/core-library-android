@@ -17,6 +17,7 @@ pipeline {
         stage('hello-world'){
             steps{
               script {
+		  echo "Hello World!!"
                   echo "${ENV_HELLO}"
               }
 			
