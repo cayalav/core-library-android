@@ -1,5 +1,5 @@
 pipeline {    
-    agent { label 'linux' };
+    agent { label 'BuildServer' };
 
     environment{
         ENV_HELLO="Hello World!" 
