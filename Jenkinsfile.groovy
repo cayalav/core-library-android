@@ -11,7 +11,7 @@ pipeline {
                 script {
 		            echo "${ENV_HELLO}"
                     echo "${ENV_HELLO}"
-                    ls
+                    ll
                     //gradle --version
                 }
             }
