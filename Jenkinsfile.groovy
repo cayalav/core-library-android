@@ -10,6 +10,7 @@ pipeline {
             steps{
                 script {
 		            echo "${ENV_HELLO}"
+                    ls -la
                     //gradle --version
                 }
             }
